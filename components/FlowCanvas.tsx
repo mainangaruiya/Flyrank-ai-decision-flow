@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import ReactFlow, { Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
+import { ReactFlow, Background, Controls, addEdge, applyNodeChanges, applyEdgeChanges } from '@xyflow/react'
+import '@xyflow/react/dist/style.css'
 import DecisionNode from './nodes/DecisionNode'
 
 const nodeTypes = { decision: DecisionNode }
@@ -46,9 +47,9 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
     }
   }, [nodes, edges])
 
-  const onNodesChange = useCallback((changes) => setNodes((nds) => applyNodeChanges(changes, nds)), [])
-  const onEdgesChange = useCallback((changes) => setEdges((eds) => applyEdgeChanges(changes, eds)), [])
-  const onConnect = useCallback((connection) => {
+  const onNodesChange = useCallback((changes: any[]) => setNodes((nds) => applyNodeChanges(changes, nds)), [])
+  const onEdgesChange = useCallback((changes: any[]) => setEdges((eds) => applyEdgeChanges(changes, eds)), [])
+  const onConnect = useCallback((connection: any) => {
     // Default label to YES if shiftKey held? For now prompt for label
     const label = prompt('Edge label (YES or NO)') || ''
     setEdges((es) => addEdge({ ...connection, label: label.toUpperCase() }, es))

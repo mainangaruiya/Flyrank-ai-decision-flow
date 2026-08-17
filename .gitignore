@@ -6,8 +6,7 @@ node_modules/
 out/
 
 # Environment files - ignore all, but keep the example/template
-.env*
-!.env.local.template
+.env
 
 # Logs
 npm-debug.log*
