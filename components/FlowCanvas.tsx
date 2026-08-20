@@ -7,6 +7,29 @@ import DecisionNode from './nodes/DecisionNode'
 
 const nodeTypes = { decision: DecisionNode }
 
+// Pasted graphs only carry a label, but React Flow needs a sourceHandle to place
+// the edge, and an id to render it at all. Fill both in so hand-written JSON works.
+function normalizeGraph(d: any) {
+  const nodes = (d.nodes || []).map((n: any, i: number) => ({
+    type: 'decision',
+    position: { x: 50 + i * 40, y: 50 + i * 40 },
+    ...n,
+    data: { prompt: '', ...(n.data || {}) },
+  }))
+
+  const edges = (d.edges || []).map((e: any, i: number) => {
+    const label = String(e.label ?? '').toUpperCase()
+    return {
+      ...e,
+      id: e.id || `e_${i}_${e.source}_${e.target}`,
+      label,
+      sourceHandle: e.sourceHandle ?? (label === 'NO' ? 'NO' : 'YES'),
+    }
+  })
+
+  return { nodes, edges }
+}
+
 export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) {
   const [nodes, setNodes] = useState<any[]>([])
   const [edges, setEdges] = useState<any[]>([])
@@ -25,8 +48,12 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
     const onImport = (e: any) => {
       const d = e.detail
       if (d?.nodes) {
-        setNodes(d.nodes)
-        setEdges(d.edges || [])
+        const g = normalizeGraph(d)
+        setNodes(g.nodes)
+        setEdges(g.edges)
+        // Keep generated ids clear of the imported ones, or Add Node reuses n_1.
+        const highest = Math.max(0, ...g.nodes.map((n: any) => parseInt(String(n.id).replace(/\D/g, ''), 10) || 0))
+        idRef.current = highest + 1
       }
     }
     const onUpdateNode = (e: any) => {
@@ -50,21 +77,37 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
   const onNodesChange = useCallback((changes: any[]) => setNodes((nds) => applyNodeChanges(changes, nds)), [])
   const onEdgesChange = useCallback((changes: any[]) => setEdges((eds) => applyEdgeChanges(changes, eds)), [])
   const onConnect = useCallback((connection: any) => {
-    // Default label to YES if shiftKey held? For now prompt for label
-    const label = prompt('Edge label (YES or NO)') || ''
-    setEdges((es) => addEdge({ ...connection, label: label.toUpperCase() }, es))
+    // The handle you drag from is the branch, so no need to ask for the label.
+    const label = String(connection.sourceHandle || 'YES').toUpperCase()
+    setEdges((es) => addEdge({ ...connection, label }, es))
   }, [])
 
-  // Execute workflow
+  // Execute workflow. Failures go to the logs panel - the run used to report
+  // success regardless, so a 500 was only visible in the browser console.
   const execute = useCallback(async () => {
-    const resp = await fetch('/api/workflow/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ graph: { nodes, edges }, input: { value: 42 } })
-    })
-    const data = await resp.json()
-    if (onLogs) onLogs(data.logs || [])
-    alert('Execution completed — check logs')
+    if (nodes.length === 0) {
+      onLogs?.([{ step: 'nothing to run', error: 'Add a decision node, or import a graph, before running.' }])
+      return
+    }
+
+    try {
+      const resp = await fetch('/api/workflow/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ graph: { nodes, edges }, input: { value: 42 } })
+      })
+      const data = await resp.json()
+
+      if (!resp.ok || data.ok === false) {
+        onLogs?.([{ step: `execution failed (HTTP ${resp.status})`, error: data.error || 'unknown error' }])
+        return
+      }
+
+      const logs = data.logs || []
+      onLogs?.(logs.length ? logs : [{ step: 'run finished', error: 'The server returned no steps.' }])
+    } catch (err) {
+      onLogs?.([{ step: 'request failed', error: String(err) }])
+    }
   }, [nodes, edges, onLogs])
 
   useEffect(() => {

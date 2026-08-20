@@ -1,7 +1,11 @@
 import client from './client'
 import OpenAI from 'openai'
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+// OPENAI_BASE_URL lets tests point at a local stub; unset means real OpenAI.
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: process.env.OPENAI_BASE_URL,
+})
 
 type Node = { id: string; data?: any }
 type Edge = { source: string; target: string; label?: string }

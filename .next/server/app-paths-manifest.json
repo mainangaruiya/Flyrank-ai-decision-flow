@@ -1,3 +1,5 @@
 {
+  "/page": "app/page.js",
+  "/api/workflow/execute/route": "app/api/workflow/execute/route.js",
   "/api/inngest/route": "app/api/inngest/route.js"
 }

@@ -1,0 +1,163 @@
+[
+  {
+    "name": "single-node-yes",
+    "description": "One decision node, value clears the threshold -> YES",
+    "requiresLLM": true,
+    "input": { "value": 42 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } }
+      ],
+      "edges": []
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"]] }
+  },
+  {
+    "name": "single-node-no",
+    "description": "Same graph, value below threshold -> NO. Proves the parse is not just defaulting.",
+    "requiresLLM": true,
+    "input": { "value": 2 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } }
+      ],
+      "edges": []
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "NO"]] }
+  },
+  {
+    "name": "chain-two-nodes",
+    "description": "YES edge routes n_1 -> n_2; second node answers NO and the run stops",
+    "requiresLLM": true,
+    "input": { "value": 42 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } },
+        { "id": "n_2", "type": "decision", "position": { "x": 350, "y": 50 }, "data": { "prompt": "Is the value greater than 100?" } }
+      ],
+      "edges": [{ "id": "e1", "source": "n_1", "target": "n_2", "label": "YES" }]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"], ["node:n_2", "NO"]] }
+  },
+  {
+    "name": "chain-three-deep",
+    "description": "Routing keeps walking: 25 > 10 YES, 25 > 20 YES, 25 > 30 NO",
+    "requiresLLM": true,
+    "input": { "value": 25 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } },
+        { "id": "n_2", "type": "decision", "position": { "x": 300, "y": 50 }, "data": { "prompt": "Is the value greater than 20?" } },
+        { "id": "n_3", "type": "decision", "position": { "x": 550, "y": 50 }, "data": { "prompt": "Is the value greater than 30?" } }
+      ],
+      "edges": [
+        { "id": "e1", "source": "n_1", "target": "n_2", "label": "YES" },
+        { "id": "e2", "source": "n_2", "target": "n_3", "label": "YES" }
+      ]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"], ["node:n_2", "YES"], ["node:n_3", "NO"]] }
+  },
+  {
+    "name": "branch-takes-yes-path",
+    "description": "Root has both YES and NO edges; value 42 must take YES to n_2 and never touch n_3",
+    "requiresLLM": true,
+    "input": { "value": 42 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 150 }, "data": { "prompt": "Is the value greater than 10?" } },
+        { "id": "n_2", "type": "decision", "position": { "x": 350, "y": 50 }, "data": { "prompt": "Is the value greater than 100?" } },
+        { "id": "n_3", "type": "decision", "position": { "x": 350, "y": 250 }, "data": { "prompt": "Is the value negative?" } }
+      ],
+      "edges": [
+        { "id": "e1", "source": "n_1", "target": "n_2", "label": "YES" },
+        { "id": "e2", "source": "n_1", "target": "n_3", "label": "NO" }
+      ]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"], ["node:n_2", "NO"]] }
+  },
+  {
+    "name": "branch-takes-no-path",
+    "description": "Same graph, value -5 must take the NO edge to n_3, which then answers YES",
+    "requiresLLM": true,
+    "input": { "value": -5 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 150 }, "data": { "prompt": "Is the value greater than 10?" } },
+        { "id": "n_2", "type": "decision", "position": { "x": 350, "y": 50 }, "data": { "prompt": "Is the value greater than 100?" } },
+        { "id": "n_3", "type": "decision", "position": { "x": 350, "y": 250 }, "data": { "prompt": "Is the value negative?" } }
+      ],
+      "edges": [
+        { "id": "e1", "source": "n_1", "target": "n_2", "label": "YES" },
+        { "id": "e2", "source": "n_1", "target": "n_3", "label": "NO" }
+      ]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "NO"], ["node:n_3", "YES"]] }
+  },
+  {
+    "name": "edge-label-lowercase",
+    "description": "Label matching is upper-cased before compare, so 'yes' must still route",
+    "requiresLLM": true,
+    "input": { "value": 42 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } },
+        { "id": "n_2", "type": "decision", "position": { "x": 350, "y": 50 }, "data": { "prompt": "Is the value greater than 100?" } }
+      ],
+      "edges": [{ "id": "e1", "source": "n_1", "target": "n_2", "label": "yes" }]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"], ["node:n_2", "NO"]] }
+  },
+  {
+    "name": "edge-label-non-exact-does-not-route",
+    "description": "Match is exact-after-uppercase, not substring, so 'Yes please' must NOT route",
+    "requiresLLM": true,
+    "input": { "value": 42 },
+    "graph": {
+      "nodes": [
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } },
+        { "id": "n_2", "type": "decision", "position": { "x": 350, "y": 50 }, "data": { "prompt": "Is the value greater than 100?" } }
+      ],
+      "edges": [{ "id": "e1", "source": "n_1", "target": "n_2", "label": "Yes please" }]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"]] }
+  },
+  {
+    "name": "start-node-is-root-not-array-first",
+    "description": "n_2 is listed first but n_1 is the root; execution must still begin at n_1",
+    "requiresLLM": true,
+    "input": { "value": 42 },
+    "graph": {
+      "nodes": [
+        { "id": "n_2", "type": "decision", "position": { "x": 350, "y": 50 }, "data": { "prompt": "Is the value greater than 100?" } },
+        { "id": "n_1", "type": "decision", "position": { "x": 50, "y": 50 }, "data": { "prompt": "Is the value greater than 10?" } }
+      ],
+      "edges": [{ "id": "e1", "source": "n_1", "target": "n_2", "label": "YES" }]
+    },
+    "expect": { "status": 200, "ok": true, "steps": [["node:n_1", "YES"], ["node:n_2", "NO"]] }
+  },
+  {
+    "name": "negative-empty-graph",
+    "description": "No nodes means no start node; known issue, dereferences undefined",
+    "requiresLLM": false,
+    "input": {},
+    "graph": { "nodes": [], "edges": [] },
+    "expect": { "status": 500, "ok": false, "errorIncludes": "Cannot read properties of undefined" },
+    "knownIssue": "Should be a 400 with a clear message, not a leaked TypeError"
+  },
+  {
+    "name": "negative-missing-graph-key",
+    "description": "Body has no graph at all",
+    "requiresLLM": false,
+    "rawBody": "{\"input\":{\"value\":1}}",
+    "expect": { "status": 500, "ok": false, "errorIncludes": "TypeError" },
+    "knownIssue": "Should be a 400 validation error"
+  },
+  {
+    "name": "negative-empty-body",
+    "description": "Completely empty request body",
+    "requiresLLM": false,
+    "rawBody": "",
+    "expect": { "status": 500, "ok": false, "errorIncludes": "JSON" },
+    "knownIssue": "Should be a 400, not a 500"
+  }
+]
