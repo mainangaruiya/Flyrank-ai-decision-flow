@@ -66,10 +66,11 @@ INNGEST_SIGNING_KEY=your_inngest_signing_key
 
 Run the development server:
 
+
 ```bash
 npm run dev
 ```
-
+liabilities/assets
 Then open:
 
 ```text
