@@ -11,6 +11,7 @@
     "init": "node scripts/init-and-test.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
     "@xyflow/react": "*",
     "clsx": "*",
     "inngest": "*",

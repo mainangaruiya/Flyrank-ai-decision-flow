@@ -1,0 +1,54 @@
+{
+  "name": "Expense approval triage",
+  "description": "10-node decision tree. Only the path the answers select actually runs - with this input that is n_1 -> n_2 -> n_5 -> n_9, four LLM calls out of ten nodes. That is the point of the graph: the other six are never touched.",
+  "input": {
+    "amount": 4200,
+    "currency": "USD",
+    "category": "travel",
+    "hasReceipt": true,
+    "isRepeatVendor": false,
+    "flaggedByPolicy": false,
+    "employeeTenureMonths": 18
+  },
+  "nodes": [
+    { "id": "n_1", "type": "decision", "position": { "x": 390, "y": 0 }, "data": { "prompt": "Is amount greater than 1000?" } },
+
+    { "id": "n_2", "type": "decision", "position": { "x": 130, "y": 190 }, "data": { "prompt": "Is amount greater than 10000?" } },
+    { "id": "n_3", "type": "decision", "position": { "x": 650, "y": 190 }, "data": { "prompt": "Is hasReceipt true?" } },
+
+    { "id": "n_4", "type": "decision", "position": { "x": 0, "y": 380 }, "data": { "prompt": "Is flaggedByPolicy true?" } },
+    { "id": "n_5", "type": "decision", "position": { "x": 260, "y": 380 }, "data": { "prompt": "Is category equal to travel?" } },
+    { "id": "n_6", "type": "decision", "position": { "x": 520, "y": 380 }, "data": { "prompt": "Is employeeTenureMonths less than 6?" } },
+    { "id": "n_7", "type": "decision", "position": { "x": 780, "y": 380 }, "data": { "prompt": "Is isRepeatVendor true?" } },
+
+    { "id": "n_8", "type": "decision", "position": { "x": 0, "y": 570 }, "data": { "prompt": "Is amount greater than 50000?" } },
+    { "id": "n_9", "type": "decision", "position": { "x": 390, "y": 570 }, "data": { "prompt": "Is amount greater than 5000?" } },
+    { "id": "n_10", "type": "decision", "position": { "x": 780, "y": 570 }, "data": { "prompt": "Is currency equal to USD?" } }
+  ],
+  "edges": [
+    { "id": "e_1y", "source": "n_1", "target": "n_2", "label": "YES" },
+    { "id": "e_1n", "source": "n_1", "target": "n_3", "label": "NO" },
+
+    { "id": "e_2y", "source": "n_2", "target": "n_4", "label": "YES" },
+    { "id": "e_2n", "source": "n_2", "target": "n_5", "label": "NO" },
+
+    { "id": "e_3y", "source": "n_3", "target": "n_6", "label": "YES" },
+    { "id": "e_3n", "source": "n_3", "target": "n_7", "label": "NO" },
+
+    { "id": "e_4y", "source": "n_4", "target": "n_8", "label": "YES" },
+    { "id": "e_4n", "source": "n_4", "target": "n_9", "label": "NO" },
+
+    { "id": "e_5y", "source": "n_5", "target": "n_9", "label": "YES" },
+    { "id": "e_5n", "source": "n_5", "target": "n_10", "label": "NO" }
+  ],
+  "expect": {
+    "status": 200,
+    "ok": true,
+    "steps": [
+      ["node:n_1", "YES"],
+      ["node:n_2", "NO"],
+      ["node:n_5", "YES"],
+      ["node:n_9", "NO"]
+    ]
+  }
+}

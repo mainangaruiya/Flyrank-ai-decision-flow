@@ -32,6 +32,8 @@ const SKIP_LLM = flag('--no-llm')
 const FORCE_MOCK = flag('--mock')
 const NO_MOCK = flag('--real')
 const KEEP_UP = flag('--keep-up')
+const PRIMARY = opt('--primary', '') // override LLM_PROVIDER for this run
+const DEFAULT_PRIMARY = 'anthropic'  // mirrors inngest/workflow.ts
 const WANT_PORT = Number(opt('--port', 3000))
 const REQ_TIMEOUT = 90_000 // first request to a route pays dev-mode compilation
 
@@ -88,10 +90,14 @@ function initEnv() {
   const loaded = [envPath, localPath].filter(existsSync).map((p) => p.replace(`${ROOT}/`, ''))
   note(`env files: ${loaded.join(', ') || 'none'}`)
 
-  for (const k of ['OPENAI_API_KEY', 'INNGEST_EVENT_KEY', 'INNGEST_SIGNING_KEY']) {
+  for (const k of ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'INNGEST_EVENT_KEY', 'INNGEST_SIGNING_KEY']) {
     const v = env[k]
     note(`${k.padEnd(20)} ${v ? `set (${v.length} chars)` : `${C.yel}EMPTY${C.r}`}`)
   }
+  const primary = PRIMARY || env.LLM_PROVIDER || DEFAULT_PRIMARY
+  const fallback = primary === 'openai' ? 'anthropic' : 'openai'
+  note(`primary              ${primary}  (${primary === 'anthropic' ? env.ANTHROPIC_MODEL || 'claude-opus-5' : env.OPENAI_MODEL || 'gpt-4o-mini'})`)
+  note(`fallback             ${fallback}  (${fallback === 'anthropic' ? env.ANTHROPIC_MODEL || 'claude-opus-5' : env.OPENAI_MODEL || 'gpt-4o-mini'})`)
   note('GROQ_API_KEY is in the template but unused by this codebase')
   note('INNGEST_* keys are unused too - /api/inngest is a log-only stub')
 
@@ -100,49 +106,77 @@ function initEnv() {
 
 // ------------------------------------------------- 2. preflight the OpenAI key
 
-async function preflightLLM(key) {
-  section('2. LLM provider')
+// Hit the endpoint each provider actually uses. Listing models is not a valid
+// check: /v1/models succeeds on an OpenAI account with no billing, then the first
+// real call 429s.
+async function checkOpenAI(key, model) {
+  if (!key) return { ok: false, reason: 'OPENAI_API_KEY is empty' }
+  const r = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Reply with only: YES' }], max_tokens: 1, temperature: 0 }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  if (r.ok) return { ok: true }
+  const body = await r.text()
+  let msg = body
+  try { msg = JSON.parse(body).error?.message || body } catch {}
+  return { ok: false, reason: `HTTP ${r.status}: ${msg.slice(0, 140)}` }
+}
+
+async function checkAnthropic(key, model) {
+  if (!key) return { ok: false, reason: 'ANTHROPIC_API_KEY is empty' }
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 1024, output_config: { effort: 'low' }, messages: [{ role: 'user', content: 'Reply with only: YES' }] }),
+    signal: AbortSignal.timeout(60_000),
+  })
+  if (r.ok) return { ok: true }
+  const body = await r.text()
+  let msg = body
+  try { msg = JSON.parse(body).error?.message || body } catch {}
+  return { ok: false, reason: `HTTP ${r.status}: ${msg.slice(0, 140)}` }
+}
+
+async function preflightLLM(env) {
+  section('2. LLM providers')
   if (SKIP_LLM) {
-    note('--no-llm passed, not checking the key')
-    return { ok: false, reason: '--no-llm' }
+    note('--no-llm passed, not checking keys')
+    return { ok: false, reason: '--no-llm', live: [] }
   }
   if (FORCE_MOCK) {
-    note('--mock passed, skipping the real key check')
-    return { ok: false, reason: 'forced mock' }
+    note('--mock passed, skipping the real key checks')
+    return { ok: false, reason: 'forced mock', live: [] }
   }
-  if (!key) {
-    note('OPENAI_API_KEY is empty - every workflow run will fail')
-    return { ok: false, reason: 'OPENAI_API_KEY is empty' }
-  }
-  // Must hit chat/completions, not /v1/models: listing models succeeds on accounts
-  // with no billing, so it reports a live key that then 429s on the first real call.
-  try {
-    const r = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: 'Reply with only: YES' }],
-        max_tokens: 1,
-        temperature: 0,
-      }),
-      signal: AbortSignal.timeout(20_000),
-    })
-    if (r.ok) {
-      note(`${C.grn}key is live and billable${C.r} - LLM cases will run for real`)
-      return { ok: true }
+
+  const anthropicModel = env.ANTHROPIC_MODEL || 'claude-opus-5'
+  const openaiModel = env.OPENAI_MODEL || 'gpt-4o-mini'
+  const checks = [
+    ['anthropic', anthropicModel, () => checkAnthropic(env.ANTHROPIC_API_KEY, anthropicModel)],
+    ['openai', openaiModel, () => checkOpenAI(env.OPENAI_API_KEY, openaiModel)],
+  ]
+
+  const live = []
+  const reasons = []
+  for (const [name, model, run] of checks) {
+    try {
+      const res = await run()
+      if (res.ok) {
+        live.push(name)
+        note(`${C.grn}${name} live${C.r} (${model})`)
+      } else {
+        reasons.push(`${name}: ${res.reason}`)
+        note(`${C.yel}${name} unusable${C.r} (${model}) - ${res.reason}`)
+      }
+    } catch (e) {
+      reasons.push(`${name}: ${e.message}`)
+      note(`${C.yel}${name} unreachable${C.r} - ${e.message}`)
     }
-    const body = await r.text()
-    const msg = (() => {
-      try { return JSON.parse(body).error?.message || body } catch { return body }
-    })()
-    note(`${C.yel}key rejected: HTTP ${r.status} - ${msg.slice(0, 140)}${C.r}`)
-    note('LLM-dependent cases will report BLOCKED, not FAIL')
-    return { ok: false, reason: `HTTP ${r.status}: ${msg.slice(0, 140)}` }
-  } catch (e) {
-    note(`${C.yel}could not reach the OpenAI API: ${e.message}${C.r}`)
-    return { ok: false, reason: e.message }
   }
+
+  if (live.length === 0) note('no usable provider - falling back to the stub')
+  return { ok: live.length > 0, reason: reasons.join(' | '), live }
 }
 
 // ------------------------------------------------------- 3. boot the dev server
@@ -172,7 +206,8 @@ async function startMock(port) {
     if (s.includes('no rule for')) console.log(`  ${C.yel}${s}${C.r}`)
   })
 
-  const base = `http://127.0.0.1:${port}/v1`
+  const root = `http://127.0.0.1:${port}`
+  const base = `${root}/v1`
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
     try {
@@ -184,8 +219,8 @@ async function startMock(port) {
       })
       if (r.ok) {
         const j = await r.json()
-        note(`stub LLM up on ${base} (self-check answered ${j.choices[0].message.content})`)
-        return { child, base }
+        note(`stub LLM up on ${root} (self-check answered ${j.choices[0].message.content})`)
+        return { child, base, root }
       }
     } catch {
       /* not listening yet */
@@ -281,6 +316,18 @@ async function runCases(base, llm, mocked) {
   if (mocked) note('LLM cases are running against the local stub, not a real model')
   const cases = JSON.parse(readFileSync(join(ROOT, 'samples', 'cases.json'), 'utf8'))
 
+  // The Load Demo preset is a test case too, read from the same file the button
+  // imports so the demo and its expected path cannot drift apart.
+  const demo = JSON.parse(readFileSync(join(ROOT, 'samples', 'demo-graph.json'), 'utf8'))
+  cases.push({
+    name: `demo-preset (${demo.nodes.length} nodes, ${demo.edges.length} edges)`,
+    description: demo.description,
+    requiresLLM: true,
+    input: demo.input,
+    graph: { nodes: demo.nodes, edges: demo.edges },
+    expect: demo.expect,
+  })
+
   for (const c of cases) {
     if (c.requiresLLM && !llm.ok && !mocked) {
       record('BLOCKED', c.name, `needs a working OpenAI key - ${llm.reason}`)
@@ -337,18 +384,99 @@ async function runCases(base, llm, mocked) {
   }
 }
 
-// ------------------------------------------------------------------- 6. summary
+// ------------------------------------------------------- 6. provider failover
+
+// Only runs against the stub, which can simulate an outage on demand. One graph,
+// one node, run under each outage combination.
+async function runFailover(base, mock, primary) {
+  const fallback = primary === 'openai' ? 'anthropic' : 'openai'
+  section(`6. Provider failover (primary ${primary}, fallback ${fallback})`)
+
+  const control = (patch) =>
+    fetch(`${mock.root}/__control`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+      signal: AbortSignal.timeout(10_000),
+    }).then((r) => r.json())
+
+  const graph = {
+    nodes: [{ id: 'n_1', data: { prompt: 'Is the value greater than 10?' } }],
+    edges: [],
+  }
+  const run = async () => {
+    const r = await fetch(`${base}/api/workflow/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ graph, input: { value: 42 } }),
+      signal: AbortSignal.timeout(REQ_TIMEOUT),
+    })
+    return { status: r.status, body: await r.json() }
+  }
+
+  const down = (name) => (name === 'openai' ? { failOpenAI: true, failAnthropic: false } : { failOpenAI: false, failAnthropic: true })
+  const answeredBy = (expected) => (res) => {
+    if (res.body.ok !== true) return `run failed: ${res.body.error}`
+    const log = (res.body.logs || [])[0]
+    if (log?.provider !== expected) return `answered by ${log?.provider}, expected ${expected}`
+    if (log?.result !== 'YES') return `result ${log?.result}, expected YES`
+    return null
+  }
+
+  const scenarios = [
+    {
+      name: `both healthy -> primary (${primary}) answers, no fallback`,
+      flags: { failOpenAI: false, failAnthropic: false },
+      expect: answeredBy(primary),
+    },
+    {
+      name: `${primary} (primary) down -> ${fallback} answers`,
+      flags: down(primary),
+      expect: answeredBy(fallback),
+    },
+    {
+      name: `${fallback} (fallback) down -> ${primary} still answers`,
+      flags: down(fallback),
+      expect: answeredBy(primary),
+    },
+    {
+      name: 'both down -> error names both providers',
+      flags: { failOpenAI: true, failAnthropic: true },
+      expect: (res) => {
+        if (res.body.ok !== false) return 'run reported success while both providers were down'
+        const e = String(res.body.error || '')
+        if (!e.includes('openai') || !e.includes('anthropic')) return `error does not name both: ${e}`
+        return null
+      },
+    },
+  ]
+
+  for (const s of scenarios) {
+    try {
+      await control(s.flags)
+      const problem = s.expect(await run())
+      if (problem) record('FAIL', s.name, problem)
+      else record('PASS', s.name)
+    } catch (e) {
+      record('FAIL', s.name, e.message)
+    }
+  }
+
+  await control({ failOpenAI: false, failAnthropic: false })
+}
+
+// ------------------------------------------------------------------- 7. summary
 
 function summary(port, mocked) {
   const n = (s) => results.filter((r) => r.status === s).length
   const pass = n('PASS'), fail = n('FAIL'), blocked = n('BLOCKED')
 
-  section('6. Summary')
+  section('7. Summary')
   console.log(`  ${C.grn}${pass} passed${C.r}   ${fail ? C.red : C.dim}${fail} failed${C.r}   ${blocked ? C.yel : C.dim}${blocked} blocked${C.r}`)
   if (mocked) {
     console.log(`  ${C.yel}LLM answers came from scripts/mock-llm.mjs.${C.r} Routing, edge-label matching and`)
     console.log(`  the YES/NO parse were exercised for real; model quality was not. Re-run with a`)
-    console.log(`  billable OPENAI_API_KEY (or --real) to test against the actual model.`)
+    console.log(`  usable provider key (or --real) to test against the actual models.`)
   }
 
   if (fail) {
@@ -391,7 +519,8 @@ let server
 let mock
 try {
   const env = initEnv()
-  const llm = await preflightLLM(env.OPENAI_API_KEY)
+  const llm = await preflightLLM(env)
+  const primary = (PRIMARY || env.LLM_PROVIDER || DEFAULT_PRIMARY).toLowerCase()
 
   const useMock = !SKIP_LLM && !NO_MOCK && (FORCE_MOCK || !llm.ok)
   if (!llm.ok && !useMock && !SKIP_LLM) note('not falling back to the stub (--real), LLM cases will be BLOCKED')
@@ -399,17 +528,24 @@ try {
   const port = await pickPort(WANT_PORT)
   if (port !== WANT_PORT) note(`port ${WANT_PORT} busy, using ${port}`)
 
-  const serverEnv = {}
+  const serverEnv = { LLM_PROVIDER: primary }
   if (useMock) {
     mock = await startMock(await pickPort(port + 1000))
     serverEnv.OPENAI_BASE_URL = mock.base
-    // The SDK rejects an empty key even when baseURL points elsewhere.
+    serverEnv.ANTHROPIC_BASE_URL = mock.root
+    // Both SDKs reject an empty key even when baseURL points elsewhere.
     if (!env.OPENAI_API_KEY) serverEnv.OPENAI_API_KEY = 'mock-key'
+    if (!env.ANTHROPIC_API_KEY) serverEnv.ANTHROPIC_API_KEY = 'mock-key'
   }
 
   server = await startServer(port, serverEnv)
   await smoke(server.base)
   await runCases(server.base, llm, useMock)
+  if (useMock) await runFailover(server.base, mock, primary)
+  else {
+    section('6. Provider failover')
+    note('skipped - simulating an outage needs the stub; re-run with --mock')
+  }
 
   const code = summary(port, useMock)
   if (KEEP_UP) {

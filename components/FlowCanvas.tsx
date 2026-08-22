@@ -33,7 +33,10 @@ function normalizeGraph(d: any) {
 export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) {
   const [nodes, setNodes] = useState<any[]>([])
   const [edges, setEdges] = useState<any[]>([])
+  // An imported graph can carry the input it was designed for; otherwise use this.
+  const [runInput, setRunInput] = useState<any>({ value: 42 })
   const idRef = useRef(1)
+  const flowRef = useRef<any>(null)
 
   useEffect(() => {
     const onAdd = () => {
@@ -51,9 +54,12 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
         const g = normalizeGraph(d)
         setNodes(g.nodes)
         setEdges(g.edges)
+        if (d.input && typeof d.input === 'object') setRunInput(d.input)
         // Keep generated ids clear of the imported ones, or Add Node reuses n_1.
         const highest = Math.max(0, ...g.nodes.map((n: any) => parseInt(String(n.id).replace(/\D/g, ''), 10) || 0))
         idRef.current = highest + 1
+        // fitView only applies on mount, so a big imported graph lands off-screen.
+        setTimeout(() => flowRef.current?.fitView({ padding: 0.15 }), 60)
       }
     }
     const onUpdateNode = (e: any) => {
@@ -94,7 +100,7 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
       const resp = await fetch('/api/workflow/execute', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ graph: { nodes, edges }, input: { value: 42 } })
+        body: JSON.stringify({ graph: { nodes, edges }, input: runInput })
       })
       const data = await resp.json()
 
@@ -108,7 +114,7 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
     } catch (err) {
       onLogs?.([{ step: 'request failed', error: String(err) }])
     }
-  }, [nodes, edges, onLogs])
+  }, [nodes, edges, runInput, onLogs])
 
   useEffect(() => {
     const btn = document.createElement('button')
@@ -123,6 +129,7 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
     <div className="bg-white border rounded p-2">
       <div className="reactflow-wrapper">
         <ReactFlow
+          onInit={(instance: any) => (flowRef.current = instance)}
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}

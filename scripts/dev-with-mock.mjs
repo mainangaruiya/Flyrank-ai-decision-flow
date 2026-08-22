@@ -30,12 +30,16 @@ const next = spawn(join(ROOT, 'node_modules', '.bin', 'next'), ['dev', '-p', POR
   env: {
     ...process.env,
     OPENAI_BASE_URL: `http://127.0.0.1:${MOCK_PORT}/v1`,
-    // The OpenAI SDK rejects an empty key even when baseURL points elsewhere.
+    ANTHROPIC_BASE_URL: `http://127.0.0.1:${MOCK_PORT}`,
+    // Both SDKs reject an empty key even when baseURL points elsewhere.
     OPENAI_API_KEY: process.env.OPENAI_API_KEY || 'mock-key',
+    ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || 'mock-key',
   },
 })
 
-console.log(`\n  LLM calls are going to the local stub on port ${MOCK_PORT}, not OpenAI.\n`)
+console.log(`\n  Both providers are pointed at the local stub on port ${MOCK_PORT}.`)
+console.log(`  Simulate an outage to watch failover:`)
+console.log(`    curl -X POST http://127.0.0.1:${MOCK_PORT}/__control -d '{"failOpenAI":true}'\n`)
 
 const shutdown = () => {
   mock.kill('SIGTERM')
