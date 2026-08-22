@@ -1,6 +1,7 @@
 {
   "name": "Expense approval triage",
   "description": "10-node decision tree. Only the path the answers select actually runs - with this input that is n_1 -> n_2 -> n_5 -> n_9, four LLM calls out of ten nodes. That is the point of the graph: the other six are never touched.",
+  "totalMs": 45000,
   "input": {
     "amount": 4200,
     "currency": "USD",

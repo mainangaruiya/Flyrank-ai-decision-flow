@@ -66,9 +66,14 @@ banner rather than assuming 3000.
 
 ## 4) Use it
 
-- **Load Demo** — imports a 10-node expense-approval tree with its own sample
-  input. Fastest way to see a real run; the graph is in
-  [`samples/demo-graph.json`](samples/demo-graph.json).
+- **Load Demo** — builds a 10-node expense-approval tree **one node at a time,
+  evenly spread over 45 seconds** (a node every 5 s), so the tree assembles at a
+  pace you can narrate. A progress line above the canvas shows `node N of 10`
+  while it runs. Each edge appears with the later of its two endpoints, and the
+  view refits as the graph grows. Clicking again restarts the sequence; Run works
+  mid-reveal on whatever is on the canvas so far. The graph, its sample input, and
+  the timing all live in [`samples/demo-graph.json`](samples/demo-graph.json) —
+  `totalMs` sets the duration for the whole reveal, or drop it for an instant load.
 - **Add Decision Node** — drops a node; edit its prompt inline.
 - **Connect nodes** — drag from the green `YES` handle or the red `NO` handle at
   the bottom of a node. The handle you drag from becomes the edge label.
@@ -159,8 +164,10 @@ path can't drift apart.
 
 Nodes need `id` and `data.prompt`; edges need `source`, `target`, and a `YES`/`NO`
 `label`. Everything else is filled in on import — `type`, `position`, edge `id`,
-and the `sourceHandle` derived from the label. An optional top-level `input` is
-used as the run input (default `{"value": 42}`).
+and the `sourceHandle` derived from the label. Optional top-level keys: `input`
+becomes the run input (default `{"value": 42}`); `totalMs` reveals the nodes one
+at a time, spread evenly over that many milliseconds; `staggerMs` sets the gap
+between nodes directly instead (`totalMs` wins if both are present).
 
 ```json
 {

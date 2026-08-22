@@ -35,8 +35,23 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
   const [edges, setEdges] = useState<any[]>([])
   // An imported graph can carry the input it was designed for; otherwise use this.
   const [runInput, setRunInput] = useState<any>({ value: 42 })
+  // A slow reveal looks like a hung page without a progress line.
+  const [progress, setProgress] = useState<{ shown: number; total: number } | null>(null)
   const idRef = useRef(1)
   const flowRef = useRef<any>(null)
+  const staggerRef = useRef<any>(null)
+
+  // Cancel any in-flight staggered load, so clicking twice restarts cleanly
+  // instead of interleaving two sequences.
+  const cancelStagger = () => {
+    if (staggerRef.current) {
+      clearInterval(staggerRef.current)
+      staggerRef.current = null
+    }
+  }
+  useEffect(() => () => cancelStagger(), [])
+
+  const refit = () => setTimeout(() => flowRef.current?.fitView({ padding: 0.15, duration: 200 }), 30)
 
   useEffect(() => {
     const onAdd = () => {
@@ -50,17 +65,49 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
     }
     const onImport = (e: any) => {
       const d = e.detail
-      if (d?.nodes) {
-        const g = normalizeGraph(d)
+      if (!d?.nodes) return
+
+      cancelStagger()
+      const g = normalizeGraph(d)
+      if (d.input && typeof d.input === 'object') setRunInput(d.input)
+      // Keep generated ids clear of the imported ones, or Add Node reuses n_1.
+      const highest = Math.max(0, ...g.nodes.map((n: any) => parseInt(String(n.id).replace(/\D/g, ''), 10) || 0))
+      idRef.current = highest + 1
+
+      // Reveal the graph one node at a time - that is what makes the demo
+      // readable. Each edge appears with the later of its two endpoints.
+      // totalMs spreads the whole reveal evenly over that duration, so the pacing
+      // holds if nodes are added or removed; staggerMs sets the gap directly.
+      const count = g.nodes.length
+      const totalMs = Number(d.totalMs) || 0
+      const staggerMs = totalMs > 0
+        ? (count > 1 ? totalMs / (count - 1) : 0)
+        : Number(d.staggerMs) || 0
+
+      if (staggerMs <= 0) {
         setNodes(g.nodes)
         setEdges(g.edges)
-        if (d.input && typeof d.input === 'object') setRunInput(d.input)
-        // Keep generated ids clear of the imported ones, or Add Node reuses n_1.
-        const highest = Math.max(0, ...g.nodes.map((n: any) => parseInt(String(n.id).replace(/\D/g, ''), 10) || 0))
-        idRef.current = highest + 1
+        setProgress(null)
         // fitView only applies on mount, so a big imported graph lands off-screen.
-        setTimeout(() => flowRef.current?.fitView({ padding: 0.15 }), 60)
+        refit()
+        return
       }
+
+      setNodes([])
+      setEdges([])
+      let shown = 0
+      const step = () => {
+        shown++
+        const visible = g.nodes.slice(0, shown)
+        const ids = new Set(visible.map((n: any) => n.id))
+        setNodes(visible)
+        setEdges(g.edges.filter((edge: any) => ids.has(edge.source) && ids.has(edge.target)))
+        setProgress(shown >= count ? null : { shown, total: count })
+        refit()
+        if (shown >= count) cancelStagger()
+      }
+      step() // show the first node immediately rather than after one interval
+      if (count > 1) staggerRef.current = setInterval(step, staggerMs)
     }
     const onUpdateNode = (e: any) => {
       const { id, data } = e.detail
@@ -127,6 +174,17 @@ export default function FlowCanvas({ onLogs }: { onLogs?: (l: any[]) => void }) 
 
   return (
     <div className="bg-white border rounded p-2">
+      {progress && (
+        <div className="mb-2 flex items-center gap-2 text-xs text-slate-500">
+          <span>Building graph… node {progress.shown} of {progress.total}</span>
+          <span className="h-1 flex-1 rounded bg-slate-200">
+            <span
+              className="block h-1 rounded bg-purple-500 transition-all duration-300"
+              style={{ width: `${(progress.shown / progress.total) * 100}%` }}
+            />
+          </span>
+        </div>
+      )}
       <div className="reactflow-wrapper">
         <ReactFlow
           onInit={(instance: any) => (flowRef.current = instance)}
